@@ -1,31 +1,32 @@
-import json, urllib.request, urllib.error
+import json, urllib.request, urllib.error, hashlib
 BASE="https://api.relay.link"
 def get(p,t=25):
     try:
         with urllib.request.urlopen(BASE+p,timeout=t) as x: return x.status,x.read().decode()
     except urllib.error.HTTPError as e: return e.code,e.read().decode()
     except Exception as e: return 0,f"ERR {e}"
-def post(p,b,t=30):
-    d=json.dumps(b).encode()
-    r=urllib.request.Request(BASE+p,data=d,headers={"content-type":"application/json"},method="POST")
-    try:
-        with urllib.request.urlopen(r,timeout=t) as x: return x.status,x.read().decode()
-    except urllib.error.HTTPError as e: return e.code,e.read().decode()
-    except Exception as e: return 0,f"ERR {e}"
 
-RID="0x1793666094e5345f3c05fe304f392d5d2b535625134a676efced0dd11c132393"
-print("### A. FULL response executions/{id} (data apa saja yang bocor?)")
-s,b=get(f"/protocol/executions/{RID}")
-print(s)
-print(json.dumps(json.loads(b),indent=1)[:1500] if s==200 else b[:300])
+print("### Kontrol: apakah 5 ID acak menghasilkan respons IDENTIK byte-per-byte?\n")
+seen={}
+for i in range(5):
+    fid="0x"+hashlib.sha256(f"ctrl{i}".encode()).hexdigest()
+    s,b=get(f"/protocol/executions/{fid}")
+    d=json.loads(b) if s==200 else {}
+    ex=d.get("execution",{})
+    key=(ex.get("chainId"),ex.get("oracleAddress"),d.get("status"))
+    seen.setdefault(key,[]).append(fid[:12])
+    print(f"  {fid[:14]} -> chain={ex.get('chainId')} status={d.get('status')} hash={hashlib.md5(b.encode()).hexdigest()[:12]}")
 
-print("\n\n### B. apakah execution orang lain bisa diakses? (pakai requestId acak valid-format)")
-import hashlib
-for i in range(3):
-    fake="0x"+hashlib.sha256(f"x{i}".encode()).hexdigest()
-    s,b=get(f"/protocol/executions/{fake}")
-    print(f"  {fake[:20]} -> {s} {b[:150]}")
+print("\n=== RINGKASAN ===")
+for k,v in seen.items():
+    print(f"  {k} muncul {len(v)}x")
 
-print("\n\n### C. oracleAddress: apa ini infra? cek /chains/health")
-s,b=get("/chains/health")
-print(s,b[:600])
+print("\n### Apakah idempotencyKey ECHO dari input? (bukan dari DB)")
+fid="0x"+"de"*32
+s,b=get(f"/protocol/executions/{fid}")
+if s==200:
+    d=json.loads(b)
+    echo = d.get("execution",{}).get("idempotencyKey")
+    print(f"  input : {fid}")
+    print(f"  echo  : {echo}")
+    print(f"  ECHO? : {echo==fid}")
